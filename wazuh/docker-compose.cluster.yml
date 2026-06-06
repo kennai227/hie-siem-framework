@@ -1,0 +1,235 @@
+# =============================================================================
+# Wazuh 4.7 Cluster — HIE SIEM Deployment
+# Architecture: 1 Manager + 2 Workers + OpenSearch + Dashboard
+# Compliance: HIPAA 164.312(b), PHIPA S.12
+# =============================================================================
+#
+# USAGE:
+#   cp .env.example .env          # Set passwords before first run
+#   docker-compose up -d
+#   # Dashboard: https://localhost:5601
+#   # API:       https://localhost:55000
+#   # OpenSearch: https://localhost:9200
+#
+# PRODUCTION NOTE:
+#   Replace self-signed certs in config/certs/ with CA-signed certificates.
+#   Use secrets management (AWS Secrets Manager / Azure Key Vault) for passwords.
+
+version: '3.9'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "5"
+
+services:
+
+  # ===========================================================================
+  # Wazuh Manager — Primary node, receives agent events, runs analysis
+  # ===========================================================================
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.7.3
+    container_name: hie-wazuh-manager
+    hostname: wazuh-manager
+    restart: unless-stopped
+    logging: *default-logging
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    environment:
+      INDEXER_URL:      "https://opensearch-node1:9200"
+      INDEXER_USERNAME: "${OPENSEARCH_USER:-admin}"
+      INDEXER_PASSWORD: "${OPENSEARCH_PASSWORD}"
+      FILEBEAT_SSL_VERIFICATION_MODE: "full"
+      SSL_CERTIFICATE_AUTHORITIES: "/etc/ssl/root-ca.pem"
+      SSL_CERTIFICATE: "/etc/ssl/filebeat.pem"
+      SSL_KEY:          "/etc/ssl/filebeat.key"
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./config/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      - ./config/wazuh_cluster/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+      # HIE-specific rules and decoders
+      - ./manager/rules/hipaa_rules.xml:/var/ossec/etc/rules/hipaa_rules.xml:ro
+      - ./manager/rules/phipa_rules.xml:/var/ossec/etc/rules/phipa_rules.xml:ro
+      - ./manager/rules/network_anomaly_rules.xml:/var/ossec/etc/rules/network_anomaly_rules.xml:ro
+      - ./manager/decoders/hie_decoders.xml:/var/ossec/etc/decoders/hie_decoders.xml:ro
+    ports:
+      - "1514:1514/udp"   # Agent event forwarding
+      - "1515:1515/tcp"   # Agent enrollment
+      - "514:514/udp"     # Syslog input
+      - "55000:55000/tcp" # Wazuh API
+    networks:
+      - hie-siem-net
+    healthcheck:
+      test: ["CMD", "/var/ossec/bin/wazuh-control", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  # Wazuh Worker — Distributed analysis for Azure-sourced logs
+  # ===========================================================================
+  wazuh-worker:
+    image: wazuh/wazuh-manager:4.7.3
+    container_name: hie-wazuh-worker
+    hostname: wazuh-worker
+    restart: unless-stopped
+    logging: *default-logging
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    environment:
+      INDEXER_URL:      "https://opensearch-node1:9200"
+      INDEXER_USERNAME: "${OPENSEARCH_USER:-admin}"
+      INDEXER_PASSWORD: "${OPENSEARCH_PASSWORD}"
+    volumes:
+      - wazuh_worker_api_configuration:/var/ossec/api/configuration
+      - wazuh_worker_etc:/var/ossec/etc
+      - wazuh_worker_logs:/var/ossec/logs
+      - wazuh_worker_queue:/var/ossec/queue
+      - ./config/wazuh_cluster/wazuh_worker.conf:/wazuh-config-mount/etc/ossec.conf
+      - ./manager/rules/hipaa_rules.xml:/var/ossec/etc/rules/hipaa_rules.xml:ro
+      - ./manager/rules/phipa_rules.xml:/var/ossec/etc/rules/phipa_rules.xml:ro
+    networks:
+      - hie-siem-net
+    depends_on:
+      wazuh-manager:
+        condition: service_healthy
+
+  # ===========================================================================
+  # OpenSearch Node 1 — Primary log storage and search
+  # ===========================================================================
+  opensearch-node1:
+    image: wazuh/wazuh-indexer:4.7.3
+    container_name: hie-opensearch-node1
+    hostname: opensearch-node1
+    restart: unless-stopped
+    logging: *default-logging
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      OPENSEARCH_JAVA_OPTS:         "-Xms${OPENSEARCH_HEAP:-2g} -Xmx${OPENSEARCH_HEAP:-2g}"
+      bootstrap.memory_lock:        "true"
+      node.name:                    "opensearch-node1"
+      cluster.name:                 "hie-siem-cluster"
+      cluster.initial_master_nodes: "opensearch-node1"
+      discovery.seed_hosts:         "opensearch-node1"
+      plugins.security.ssl.transport.pemcert_filepath:    "indexer.pem"
+      plugins.security.ssl.transport.pemkey_filepath:     "indexer-key.pem"
+      plugins.security.ssl.transport.pemtrustedcas_filepath: "root-ca.pem"
+      plugins.security.ssl.http.enabled:                  "true"
+      plugins.security.ssl.http.pemcert_filepath:         "indexer.pem"
+      plugins.security.ssl.http.pemkey_filepath:          "indexer-key.pem"
+      plugins.security.ssl.http.pemtrustedcas_filepath:   "root-ca.pem"
+      plugins.security.allow_unsafe_democertificates:     "false"
+      plugins.security.allow_default_init_securityindex:  "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${OPENSEARCH_PASSWORD}"
+    volumes:
+      - opensearch-node1-data:/var/lib/wazuh-indexer
+      - ./config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem
+      - ./config/wazuh_indexer_ssl_certs/opensearch.node1.pem:/usr/share/wazuh-indexer/certs/indexer.pem
+      - ./config/wazuh_indexer_ssl_certs/opensearch.node1-key.pem:/usr/share/wazuh-indexer/certs/indexer-key.pem
+      - ./config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml
+      # ILM policy for 7-year HIPAA retention
+      - ./config/opensearch/ilm_policy.json:/usr/share/wazuh-indexer/config/ilm_policy.json:ro
+    ports:
+      - "9200:9200/tcp"
+    networks:
+      - hie-siem-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk https://localhost:9200 -u admin:${OPENSEARCH_PASSWORD} | grep -q '\"status' : \"green\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ===========================================================================
+  # Wazuh Dashboard — OpenSearch Dashboards with Wazuh plugin
+  # ===========================================================================
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.7.3
+    container_name: hie-wazuh-dashboard
+    hostname: wazuh-dashboard
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      INDEXER_USERNAME:             "${OPENSEARCH_USER:-admin}"
+      INDEXER_PASSWORD:             "${OPENSEARCH_PASSWORD}"
+      WAZUH_API_URL:                "https://wazuh-manager"
+      DASHBOARD_USERNAME:           "${DASHBOARD_USER:-kibanaserver}"
+      DASHBOARD_PASSWORD:           "${DASHBOARD_PASSWORD}"
+      API_USERNAME:                 "${API_USER:-wazuh-wui}"
+      API_PASSWORD:                 "${API_PASSWORD}"
+    volumes:
+      - ./config/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - ./config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+    ports:
+      - "5601:5601/tcp"
+    networks:
+      - hie-siem-net
+    depends_on:
+      opensearch-node1:
+        condition: service_healthy
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  hie-siem-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh_worker_api_configuration:
+  wazuh_worker_etc:
+  wazuh_worker_logs:
+  wazuh_worker_queue:
+  opensearch-node1-data:

@@ -1,0 +1,5 @@
+azure_region        = "canadacentral"
+environment         = "prod"
+vnet_cidr           = "10.20.0.0/16"
+private_subnet_cidr = "10.20.1.0/24"
+log_daily_quota_gb  = 50

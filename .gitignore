@@ -1,0 +1,44 @@
+# Secrets — never commit
+.env
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Terraform state — use remote backend
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Wazuh certs (generate fresh per deployment)
+config/wazuh_indexer_ssl_certs/*.pem
+config/wazuh_indexer_ssl_certs/*.key
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

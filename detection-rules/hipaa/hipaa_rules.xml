@@ -1,0 +1,180 @@
+<!--
+  HIE SIEM — HIPAA Security Rule Detection Rules
+  Mapped to: 45 CFR Part 164 — Security Standards for the Protection of ePHI
+  Also satisfies: PHIPA S.12, PIPEDA Principle 7
+
+  Rule ID range: 100000-100499 (HIE HIPAA rules)
+
+  HIPAA Control References:
+    164.312(a)(1)  — Access Control
+    164.312(a)(2)  — Unique User Identification
+    164.312(b)     — Audit Controls
+    164.312(c)(1)  — Integrity
+    164.312(d)     — Person/Entity Authentication
+    164.312(e)     — Transmission Security
+-->
+
+<group name="hipaa,hie,phi_access,">
+
+  <!-- =========================================================
+       ACCESS CONTROL — 164.312(a)(1)
+       Detect unauthorized or anomalous ePHI access attempts
+  ========================================================== -->
+
+  <rule id="100001" level="12">
+    <if_group>authentication_failed</if_group>
+    <field name="data.srcip" type="pcre2">^(?!10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)</field>
+    <description>HIPAA 164.312(a)(1): ePHI system authentication failure from external IP $(data.srcip)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <options>alert_by_email</options>
+    <group>hipaa_164_312_a_1,authentication_failed,phi_access,</group>
+  </rule>
+
+  <rule id="100002" level="14">
+    <if_rule>100001</if_rule>
+    <same_source_ip />
+    <frequency>5</frequency>
+    <timeframe>120</timeframe>
+    <description>HIPAA 164.312(a)(1) CRITICAL: Brute force attack on ePHI system from $(data.srcip) — $(frequency) failures in $(timeframe)s</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>hipaa_164_312_a_1,brute_force,phi_access,pci_dss_10.2.4,gdpr_IV_35.7.d,</group>
+  </rule>
+
+  <rule id="100003" level="13">
+    <if_group>authentication_success</if_group>
+    <time>22:00 - 06:00</time>
+    <field name="data.program">ehr|epic|meditech|cerner|emr</field>
+    <description>HIPAA 164.312(b): After-hours ePHI system access by $(data.dstuser) at $(timestamp) — potential unauthorized access</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>hipaa_164_312_b,after_hours_access,phi_access,</group>
+  </rule>
+
+  <!-- =========================================================
+       AUDIT CONTROLS — 164.312(b)
+       All ePHI access must be logged and alertable
+  ========================================================== -->
+
+  <rule id="100010" level="10">
+    <if_group>syslog</if_group>
+    <match>audit.*PHI|patient.*record.*access|ePHI.*read|medical.*record</match>
+    <description>HIPAA 164.312(b): ePHI audit event — $(data.dstuser) accessed patient data</description>
+    <group>hipaa_164_312_b,phi_audit,</group>
+  </rule>
+
+  <rule id="100011" level="15">
+    <if_rule>100010</if_rule>
+    <same_user />
+    <frequency>50</frequency>
+    <timeframe>300</timeframe>
+    <description>HIPAA 164.312(b) CRITICAL: Mass ePHI record access — $(data.dstuser) accessed $(frequency) records in $(timeframe)s — possible data exfiltration</description>
+    <mitre>
+      <id>T1530</id>
+    </mitre>
+    <group>hipaa_164_312_b,mass_phi_access,data_exfiltration,</group>
+  </rule>
+
+  <rule id="100012" level="14">
+    <if_group>syslog</if_group>
+    <match>audit.*log.*cleared|auditd.*config.*changed|audit.*disabled</match>
+    <description>HIPAA 164.312(b) CRITICAL: Audit log tampered or disabled — compliance violation on $(hostname)</description>
+    <mitre>
+      <id>T1070.002</id>
+    </mitre>
+    <group>hipaa_164_312_b,audit_tampering,integrity,</group>
+  </rule>
+
+  <!-- =========================================================
+       INTEGRITY — 164.312(c)(1)
+       Detect unauthorized modification of ePHI
+  ========================================================== -->
+
+  <rule id="100020" level="12">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">/var/lib/ehr|/opt/epic|/data/phi|/mnt/patient</field>
+    <description>HIPAA 164.312(c)(1): ePHI file system modification detected — $(syscheck.path) changed by $(syscheck.uname)</description>
+    <mitre>
+      <id>T1565.001</id>
+    </mitre>
+    <group>hipaa_164_312_c_1,fim_phi,integrity,</group>
+  </rule>
+
+  <rule id="100021" level="15">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">/var/lib/ehr|/opt/epic|/data/phi|/mnt/patient</field>
+    <field name="syscheck.event">deleted</field>
+    <description>HIPAA 164.312(c)(1) CRITICAL: ePHI file DELETED — $(syscheck.path) — immediate investigation required</description>
+    <mitre>
+      <id>T1485</id>
+    </mitre>
+    <group>hipaa_164_312_c_1,phi_deletion,integrity,</group>
+  </rule>
+
+  <!-- =========================================================
+       TRANSMISSION SECURITY — 164.312(e)(2)(ii)
+       Detect unencrypted PHI transmission
+  ========================================================== -->
+
+  <rule id="100030" level="13">
+    <if_group>web_log</if_group>
+    <match>hl7|fhir|patient|dob|ssn|mrn|health_insurance</match>
+    <field name="data.protocol">http$</field>
+    <description>HIPAA 164.312(e)(2)(ii): Potential ePHI transmitted over unencrypted HTTP from $(data.srcip)</description>
+    <mitre>
+      <id>T1040</id>
+    </mitre>
+    <group>hipaa_164_312_e,unencrypted_phi,transmission,</group>
+  </rule>
+
+  <rule id="100031" level="12">
+    <if_group>firewall</if_group>
+    <field name="data.dstport">25|110|143</field>
+    <description>HIPAA 164.312(e)(2)(ii): Unencrypted email protocol detected from ePHI network segment — possible PHI in plaintext email</description>
+    <group>hipaa_164_312_e,unencrypted_email,transmission,</group>
+  </rule>
+
+  <!-- =========================================================
+       EMERGENCY ACCESS PROCEDURE — 164.312(a)(2)(ii)
+       Break-glass access monitoring
+  ========================================================== -->
+
+  <rule id="100040" level="14">
+    <if_group>authentication_success</if_group>
+    <match>break.glass|emergency.access|override.access</match>
+    <description>HIPAA 164.312(a)(2)(ii): Break-glass emergency access invoked by $(data.dstuser) — automatic incident ticket required</description>
+    <group>hipaa_164_312_a_2,break_glass,emergency_access,</group>
+  </rule>
+
+  <!-- =========================================================
+       RANSOMWARE DETECTION — Healthcare-specific patterns
+       ALPHV/BlackCat, LockBit patterns common in Canadian health
+  ========================================================== -->
+
+  <rule id="100050" level="15">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">\.(alphv|lockbit|hive|blackcat|encrypted|locked|ransom)$</field>
+    <description>HIPAA CRITICAL: Ransomware file extension detected on ePHI system $(hostname) — IMMEDIATE INCIDENT RESPONSE</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware,phi_at_risk,incident_response,hipaa_164_308_a_6,</group>
+  </rule>
+
+  <rule id="100051" level="15">
+    <if_group>syscheck</if_group>
+    <same_path />
+    <frequency>100</frequency>
+    <timeframe>60</timeframe>
+    <description>HIPAA CRITICAL: Mass file modification on ePHI system — $(frequency) files changed in $(timeframe)s — ransomware encryption pattern</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware,phi_at_risk,incident_response,</group>
+  </rule>
+
+</group>

@@ -1,0 +1,101 @@
+<!--
+  HIE SIEM — PHIPA (Ontario Personal Health Information Protection Act) Rules
+  Statute: S.O. 2004, c. 3, Sched. A
+  Rule ID range: 100500-100699
+
+  Key PHIPA Sections:
+    S.12  — Agents authorized to collect, use, disclose
+    S.29  — Consent for collection
+    S.49  — Notification of privacy breach
+    S.54  — Complaints and investigations
+    S.72  — Offences
+-->
+
+<group name="phipa,hie,ontario_phi,">
+
+  <!-- =========================================================
+       S.12 — Agent Authorization Violations
+       Custodian agents must have explicit authorization
+  ========================================================== -->
+
+  <rule id="100501" level="13">
+    <if_group>syslog</if_group>
+    <match>unauthorized.*agent|agent.*not.*authorized|invalid.*custodian</match>
+    <description>PHIPA S.12: Unauthorized health information custodian agent access detected — $(data.dstuser) on $(hostname)</description>
+    <group>phipa_s12,agent_authorization,ontario_phi,</group>
+  </rule>
+
+  <rule id="100502" level="12">
+    <if_group>authentication_success</if_group>
+    <field name="data.dstuser" negate="yes" type="pcre2">@(hospital|health|phipa-authorized)\.</field>
+    <match>ehr|patient_portal|phi_db|health_record</match>
+    <description>PHIPA S.12: Non-custodian account accessing health information system — $(data.dstuser) from $(data.srcip)</description>
+    <group>phipa_s12,unauthorized_access,ontario_phi,</group>
+  </rule>
+
+  <!-- =========================================================
+       S.49 — Privacy Breach Notification Triggers
+       Must notify IPC Ontario within specific timeframes
+  ========================================================== -->
+
+  <rule id="100510" level="14">
+    <if_rule>100011</if_rule>
+    <description>PHIPA S.49 BREACH TRIGGER: Mass ePHI access meets Ontario breach notification threshold — IPC notification required within required timeframe</description>
+    <group>phipa_s49,breach_notification,ontario_phi,</group>
+  </rule>
+
+  <rule id="100511" level="14">
+    <if_rule>100021</if_rule>
+    <description>PHIPA S.49 BREACH TRIGGER: ePHI file deletion — Ontario privacy breach — document and notify IPC if 10+ records affected</description>
+    <group>phipa_s49,breach_notification,ontario_phi,</group>
+  </rule>
+
+  <rule id="100512" level="15">
+    <if_group>syslog</if_group>
+    <match>privacy.*breach|phi.*exposed|patient.*data.*leak|health.*record.*disclosed</match>
+    <description>PHIPA S.49 CRITICAL: Privacy breach event logged — automatic IPC Ontario notification workflow triggered</description>
+    <group>phipa_s49,breach_notification,ontario_phi,</group>
+  </rule>
+
+  <!-- =========================================================
+       S.12(1)(b) — Audit and Accountability
+       All access to personal health information must be logged
+  ========================================================== -->
+
+  <rule id="100520" level="10">
+    <if_group>syslog</if_group>
+    <match>consent.*override|purpose.*limitation.*bypass|secondary.*use</match>
+    <description>PHIPA S.12(1)(b): Consent override or secondary use of PHI detected — $(data.dstuser) on $(data.srcip)</description>
+    <group>phipa_s12_1_b,consent_violation,ontario_phi,</group>
+  </rule>
+
+  <!-- =========================================================
+       Cross-border Data Transfer Detection
+       PHIPA restricts PHI leaving Ontario/Canada
+  ========================================================== -->
+
+  <rule id="100530" level="14">
+    <if_group>firewall</if_group>
+    <field name="data.dstip" type="pcre2">^(?!10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)</field>
+    <field name="data.srcip" type="pcre2">10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.</field>
+    <field name="data.dstport">443|80|21|22|25</field>
+    <match>phi|ehr|patient|health_record|dicom</match>
+    <description>PHIPA CROSS-BORDER ALERT: Potential PHI transfer to external IP $(data.dstip) — verify Canada data residency compliance</description>
+    <mitre>
+      <id>T1048</id>
+    </mitre>
+    <group>phipa_cross_border,data_residency,ontario_phi,pipeda,</group>
+  </rule>
+
+  <rule id="100531" level="15">
+    <if_group>aws_cloudtrail</if_group>
+    <match>S3.*CopyObject|S3.*PutObject</match>
+    <field name="data.aws.requestParameters.destinationBucket" type="pcre2">us-east|eu-west|ap-southeast</field>
+    <description>PHIPA CRITICAL: S3 object copy to non-Canadian AWS region detected — PHI data residency violation</description>
+    <mitre>
+      <id>T1537</id>
+    </mitre>
+    <group>phipa_cross_border,data_residency,aws_s3,pipeda,</group>
+  </rule>
+
+</group>

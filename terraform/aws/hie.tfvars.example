@@ -1,0 +1,8 @@
+aws_region                  = "ca-central-1"
+environment                 = "prod"
+vpc_cidr                    = "10.10.0.0/16"
+private_subnet_cidrs        = ["10.10.1.0/24", "10.10.2.0/24"]
+public_subnet_cidrs         = ["10.10.10.0/24", "10.10.11.0/24"]
+wazuh_manager_instance_type = "m6i.xlarge"
+opensearch_instance_type    = "r6g.large.search"
+log_retention_days          = 365

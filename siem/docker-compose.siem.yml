@@ -1,0 +1,34 @@
+# HIE SIEM Pipeline — Logstash + Filebeat
+version: '3.9'
+
+services:
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.12.0
+    container_name: hie-logstash
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_USER:     "${OPENSEARCH_USER:-admin}"
+      OPENSEARCH_PASSWORD: "${OPENSEARCH_PASSWORD}"
+      ALERT_WEBHOOK_URL:   "${ALERT_WEBHOOK_URL:-}"
+      AZURE_EVENT_HUB_CONNECTION_STRING: "${AZURE_EVENT_HUB_CONNECTION_STRING:-}"
+      AZURE_STORAGE_CONNECTION_STRING:   "${AZURE_STORAGE_CONNECTION_STRING:-}"
+      LS_JAVA_OPTS: "-Xmx2g -Xms2g"
+    volumes:
+      - ./logstash/hie-pipeline.conf:/usr/share/logstash/pipeline/hie-pipeline.conf:ro
+      - ./certs:/etc/logstash/certs:ro
+    ports:
+      - "5044:5044"   # Beats input
+      - "5514:5514"   # Syslog
+    networks:
+      - hie-siem-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600/_node/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  hie-siem-net:
+    external: true
+    name: hie-siem-project_hie-siem-net

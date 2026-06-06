@@ -1,0 +1,25 @@
+# HIE SIEM Anomaly Detector — Baseline Configuration
+aws_region: "ca-central-1"
+aws_log_group_vpc: "/aws/vpc/hie-siem-flow-logs"
+aws_log_group_cloudtrail: "aws-cloudtrail-logs"
+
+azure_workspace_id: ""        # Set from Azure Portal or Key Vault
+azure_subscription_id: ""
+
+opensearch_host: "localhost"
+opensearch_port: 9200
+opensearch_user: "admin"
+opensearch_password: ""       # Set via OPENSEARCH_PASSWORD env var
+
+wazuh_index_pattern: "wazuh-alerts-*"
+
+# Model parameters
+isolation_forest_contamination: 0.01    # ~1% expected anomaly rate
+isolation_forest_n_estimators: 200
+ueba_baseline_days: 30
+detection_window_minutes: 15
+alert_threshold: 0.85
+
+# Alerting
+alert_webhook_url: ""         # Slack / Teams / PagerDuty webhook
+alert_email: "soc@yourdomain.ca"
