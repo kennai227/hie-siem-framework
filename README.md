@@ -3,8 +3,23 @@
 > A production-grade security monitoring framework for **Health Information Exchange (HIE)** environments, spanning **AWS Canada Central** and **Azure Canada Central**. Built to meet **HIPAA**, **PHIPA**, and **PIPEDA** compliance requirements with real-time log aggregation, distributed anomaly detection, and centralized threat correlation.
 
 ---
+---
+
+## Implementation Status
+
+This repository is a portfolio-grade healthcare SIEM framework and reference implementation. It contains infrastructure templates, Wazuh configuration structure, detection-rule organization, SIEM pipeline design, and Python-based anomaly detection components.
+
+The framework is intended for cybersecurity research, cloud security architecture review, and portfolio demonstration. It is not intended for direct production deployment without environment-specific hardening, access-control review, secrets management, compliance validation, and security testing.
+
+A separate Streamlit-based local dashboard demo is being developed to visually demonstrate synthetic healthcare log generation, SOC dashboards, alert triage, anomaly detection, UEBA scoring, and compliance monitoring.
 
 ## Architecture Overview
+![HIE-SIEM Architecture Overview](docs/diagrams/architecture_overview.png)
+
+
+![HIE-SIEM Detection Pipeline](docs/diagrams/detection_pipeline.png)
+
+![HIE-SIEM Compliance Mapping](docs/diagrams/compliance_mapping.png)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -101,13 +116,15 @@ All logs are normalized to **ECS (Elastic Common Schema)** before ingestion rega
 
 ## Compliance Mapping
 
-| Control | HIPAA § | PHIPA S. | Implementation |
+| Control | HIPAA § | PHIPA | Implementation |
 |---|---|---|---|
-| Audit Controls | 164.312(b) | 12(1)(b) | Wazuh FIM + CloudTrail + Azure Monitor |
-| Access Control | 164.312(a)(1) | 12(1)(a) | IAM policies + Wazuh UEBA rules |
-| Transmission Security | 164.312(e)(2)(ii) | 12(1)(d) | TLS 1.3 enforced, KMS encryption |
-| Integrity Controls | 164.312(c)(1) | 13 | S3 Object Lock + immutable log storage |
-| Emergency Access | 164.312(a)(2)(ii) | 16 | Break-glass IAM role + alert rule |
+| Audit Controls | 164.312(b) | S.12(1)(b) | Wazuh FIM + CloudTrail + Azure Monitor |
+| Access Control | 164.312(a)(1) | S.12(1)(a) | IAM policies + Wazuh UEBA rules |
+| Transmission Security | 164.312(e)(2)(ii) | S.12(1)(d) | TLS 1.3 enforcement and KMS encryption |
+| Integrity Controls | 164.312(c)(1) | S.13 | S3 Object Lock and immutable log storage |
+| Emergency Access | 164.312(a)(2)(ii) | S.16 | Break-glass IAM role with alert rule |
+| Data Residency | — | S.10 | AWS Canada Central and Azure Canada Central regional enforcement |
+| Breach Notification Support | 164.400–414 | S.49 | Alert routing for suspected PHI exposure and unauthorized access |
 
 ---
 
